@@ -126,7 +126,7 @@ def parse_expense_with_ai(user_input, selected_country, selected_date_str, api_k
 
 
 # --- Streamlit UI 설정 ---
-st.set_page_config(page_title="✈️ 자유 추가형 글로벌 가계부", page_icon="✈️", layout="wide")
+st.set_page_config(page_title="✈️ 자유 추가형 글로벌 가계부", page_icon="✈️", layout="centered")
 
 # 세션 상태 초기화
 if "selected_country" not in st.session_state:
