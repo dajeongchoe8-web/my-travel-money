@@ -125,7 +125,25 @@ def parse_expense_with_ai(user_input, selected_country, selected_date_str, api_k
                 return None
 
 
-# --- Streamlit UI 설정 (모바일 최적화 centered) ---
+# --- 입력 제출 처리를 위한 콜백 함수 ---
+def process_submission(country, date_str):
+    user_input = st.session_state.get("user_input_field", "").strip()
+    if not user_input:
+        st.warning("내용을 입력해주세요!")
+        return
+
+    parsed_data = parse_expense_with_ai(user_input, country, date_str, API_KEY)
+    if parsed_data and isinstance(parsed_data, dict):
+        current_data = load_data()
+        current_data.append(parsed_data)
+        save_data(current_data)
+
+        # 입력창 자동으로 비우기 (에러 없이 안전하게 동작)
+        st.session_state["user_input_field"] = ""
+        st.toast(f"기록 완료! [{parsed_data.get('type')}] {parsed_data.get('description')} ({parsed_data.get('amount_krw', 0):,}원)")
+
+
+# --- Streamlit UI 설정 ---
 st.set_page_config(page_title="✈️ 자유 추가형 글로벌 가계부", page_icon="✈️", layout="centered")
 
 # 세션 상태 초기화
@@ -186,32 +204,20 @@ else:
     selected_date = st.date_input("날짜 선택", datetime.now())
     selected_date_str = selected_date.strftime("%Y-%m-%d")
 
-    # 입력창 자동 초기화를 위한 Key 적용
-    user_input = st.text_input(
+    # 입력 필드
+    st.text_input(
         "내용 입력",
         placeholder="예: '점심 15파운드 카드', '50유로 환전'",
         key="user_input_field"
     )
 
-    if st.button("AI로 내역 기록하기", use_container_width=True):
-        if not user_input:
-            st.warning("내용을 입력해주세요!")
-        else:
-            with st.spinner("AI가 내역 분석 중..."):
-                parsed_data = parse_expense_with_ai(user_input, current_country, selected_date_str, API_KEY)
-
-                if parsed_data and isinstance(parsed_data, dict):
-                    current_data = load_data()
-                    current_data.append(parsed_data)
-                    save_data(current_data)
-
-                    trans_type = parsed_data.get('type', '지출')
-                    pay_method = parsed_data.get('payment_method', '카드')
-                    st.toast(f"기록 완료! [{trans_type}] {parsed_data.get('description')} ({parsed_data.get('amount_krw', 0):,}원)")
-                    
-                    # 입력 필드 자동 지우기 후 새로고침
-                    st.session_state["user_input_field"] = ""
-                    st.rerun()
+    # 버튼 클릭 시 안전한 콜백 함수(on_click)로 제출 처리
+    st.button(
+        "AI로 내역 기록하기",
+        use_container_width=True,
+        on_click=process_submission,
+        args=(current_country, selected_date_str)
+    )
 
     st.markdown("---")
     
@@ -237,7 +243,6 @@ else:
             if "original_amount_text" not in country_df.columns:
                 country_df["original_amount_text"] = ""
 
-            # 4가지 메인 탭 설정 (입출금 구분 탭 추가)
             tab1, tab2, tab3, tab4 = st.tabs(["📋 전체 보기", "💵/💸 입출금 보기", "🏷️ 카테고리별", "📅 날짜별"])
 
             total_income = country_df[country_df["type"] == "수입"]["amount_krw"].sum()
@@ -250,7 +255,6 @@ else:
                 st.caption(f"총 입금: {total_income:,}원 / 총 지출: {total_expense:,}원")
                 st.markdown("---")
 
-                # 스마트폰에 최적화된 카드형 리스트
                 for _, row in country_df.sort_values(by="date", ascending=False).iterrows():
                     orig_text = row.get("original_amount_text", "")
                     orig_display = f" ({orig_text})" if pd.notna(orig_text) and orig_text else ""
@@ -273,7 +277,7 @@ else:
                                 st.rerun()
                         st.markdown("---")
 
-            # 2. 입금/출금 구분 보기 탭 (새로 추가)
+            # 2. 입금/출금 구분 보기 탭
             with tab2:
                 st.markdown("#### 💵 수입 (입금) 내역")
                 inc_df = country_df[country_df["type"] == "수입"][["date", "payment_method", "description", "amount_krw"]].copy()
