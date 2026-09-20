@@ -98,7 +98,7 @@ def delete_country_db(country_name):
         return False
 
 
-# AI 분석 함수 (gemini-1.5-flash 모델 적용)
+# AI 분석 함수 (gemini-2.0-flash 모델 적용)
 def parse_expense_with_ai(user_input, selected_country, selected_city, selected_date_str, api_key):
     if not api_key:
         st.error("API Key가 지정되지 않았습니다.")
@@ -135,7 +135,7 @@ def parse_expense_with_ai(user_input, selected_country, selected_city, selected_
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
