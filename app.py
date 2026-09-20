@@ -98,7 +98,7 @@ def delete_country_db(country_name):
         return False
 
 
-# AI 분석 함수
+# AI 분석 함수 (gemini-2.5-flash 모델 적용)
 def parse_expense_with_ai(user_input, selected_country, selected_city, selected_date_str, api_key):
     if not api_key:
         st.error("API Key가 지정되지 않았습니다.")
@@ -135,7 +135,7 @@ def parse_expense_with_ai(user_input, selected_country, selected_city, selected_
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model="gemini-3.6-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
@@ -151,7 +151,6 @@ def parse_expense_with_ai(user_input, selected_country, selected_city, selected_
 
             if isinstance(result, dict):
                 result["id"] = str(uuid.uuid4())
-                # description 뒤에 도시 정보를 구분용으로 저장
                 if selected_city and selected_city != "전체":
                     result["city"] = selected_city
 
@@ -176,7 +175,6 @@ def process_submission(country, city, date_str):
     with st.spinner("AI 분석 및 DB 저장 중..."):
         parsed_data = parse_expense_with_ai(user_input, country, city, date_str, API_KEY)
         if parsed_data and isinstance(parsed_data, dict):
-            # city 정보 추가
             target_city = city if (city and city != "전체") else "기본"
             parsed_data["city"] = target_city
 
@@ -192,7 +190,7 @@ if "selected_country" not in st.session_state:
     st.session_state.selected_country = None
 
 if "cities" not in st.session_state:
-    st.session_state.cities = {}  # { '영국': ['런던', '본머스'], ... }
+    st.session_state.cities = {}
 
 # 사이드바: 국가 및 도시 관리
 st.sidebar.header("➕ 국가 및 도시 관리")
