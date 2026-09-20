@@ -98,7 +98,7 @@ def delete_country_db(country_name):
         return False
 
 
-# AI 분석 함수 (gemini-2.0-flash 모델 적용)
+# AI 분석 함수 (gemini-3.6-flash 적용 및 재시도 로직 강화)
 def parse_expense_with_ai(user_input, selected_country, selected_city, selected_date_str, api_key):
     if not api_key:
         st.error("API Key가 지정되지 않았습니다.")
@@ -135,7 +135,7 @@ def parse_expense_with_ai(user_input, selected_country, selected_city, selected_
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.6-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
@@ -157,9 +157,13 @@ def parse_expense_with_ai(user_input, selected_country, selected_city, selected_
             return result
 
         except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(1)
-                continue
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # 사용량 초과 발생 시 5초 대기 후 재시도
+                    continue
+                else:
+                    st.error("AI 하루 무료 호출 한도를 초과했습니다. 잠시 후 다시 시도하시거나 새로운 Google API 키로 변경해 주세요.")
+                    return None
             else:
                 st.error(f"AI 분석 오류: {e}")
                 return None
