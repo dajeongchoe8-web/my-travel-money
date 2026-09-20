@@ -1,5 +1,4 @@
 import json
-import os
 import time
 import uuid
 from datetime import datetime
@@ -7,60 +6,98 @@ import pandas as pd
 from google import genai
 from google.genai import types
 import streamlit as st
+from supabase import create_client, Client
 
 # ==========================================
-# 🔑 자동으로 적용된 Gemini API 키
+# 🔑 API 키 및 Secrets에서 Supabase 정보 가져오기
 # ==========================================
 API_KEY = "AQ.Ab8RN6KJthDRoQQeW3-N9qsx9bRUd4j3FlNvdTwfk-FuAa5gDw"
 
-DATA_FILE = "account_book.json"
-COUNTRIES_FILE = "countries.json"
+# Streamlit Secrets에서 클라우드 DB 접속 정보 로드
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+except Exception:
+    SUPABASE_URL = ""
+    SUPABASE_KEY = ""
 
 
-# --- 데이터 로드 및 저장 함수 ---
+# DB 클라이언트 동적 생성 (캐시 문제 차단)
+def get_supabase() -> Client:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        st.error("Streamlit Secrets에 SUPABASE_URL과 SUPABASE_KEY를 설정해 주세요!")
+        st.stop()
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+# --- Supabase 기반 데이터 로드 및 저장 함수 ---
 def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                raw_data = json.load(f)
-
-            cleaned_data = []
-            for item in raw_data:
-                if isinstance(item, list):
-                    for sub_item in item:
-                        if isinstance(sub_item, dict):
-                            if "id" not in sub_item:
-                                sub_item["id"] = str(uuid.uuid4())
-                            cleaned_data.append(sub_item)
-                elif isinstance(item, dict):
-                    if "id" not in item:
-                        item["id"] = str(uuid.uuid4())
-                    cleaned_data.append(item)
-
-            return cleaned_data
-        except Exception:
-            return []
-    return []
+    try:
+        supabase = get_supabase()
+        response = supabase.table("expenses").select("*").execute()
+        return response.data if response.data else []
+    except Exception as e:
+        st.error(f"데이터 로드 중 오류 발생: {e}")
+        return []
 
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+def save_single_data(item):
+    try:
+        supabase = get_supabase()
+        supabase.table("expenses").insert(item).execute()
+        return True
+    except Exception as e:
+        st.error(f"데이터 저장 실패: {e}")
+        return False
+
+
+def delete_single_data(item_id):
+    try:
+        supabase = get_supabase()
+        supabase.table("expenses").delete().eq("id", item_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"삭제 실패: {e}")
+        return False
+
+
+def clear_all_data():
+    try:
+        supabase = get_supabase()
+        supabase.table("expenses").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        return True
+    except Exception as e:
+        st.error(f"초기화 실패: {e}")
+        return False
 
 
 def load_countries():
-    if os.path.exists(COUNTRIES_FILE):
-        try:
-            with open(COUNTRIES_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return ["한국", "영국", "프랑스", "미국", "일본"]
-    return ["한국", "영국", "프랑스", "미국", "일본"]
+    try:
+        supabase = get_supabase()
+        response = supabase.table("countries").select("name").execute()
+        if response.data:
+            return [r["name"] for r in response.data]
+    except Exception:
+        pass
+    return ["한국", "영국", "프랑스", "미국", "일본", "유로(공통)"]
 
 
-def save_countries(countries):
-    with open(COUNTRIES_FILE, "w", encoding="utf-8") as f:
-        json.dump(countries, f, ensure_ascii=False, indent=4)
+def add_country_db(country_name):
+    try:
+        supabase = get_supabase()
+        supabase.table("countries").insert({"name": country_name}).execute()
+        return True
+    except Exception:
+        return False
+
+
+def delete_country_db(country_name):
+    try:
+        supabase = get_supabase()
+        supabase.table("countries").delete().eq("name", country_name).execute()
+        return True
+    except Exception:
+        return False
 
 
 # AI 분석 함수
@@ -121,26 +158,23 @@ def parse_expense_with_ai(user_input, selected_country, selected_date_str, api_k
                 time.sleep(1)
                 continue
             else:
-                st.error(f"AI 분석 중 오류가 발생했습니다: {e}")
+                st.error(f"AI 분석 오류: {e}")
                 return None
 
 
-# --- 입력 제출 처리를 위한 콜백 함수 ---
+# --- 입력 제출 처리 함수 ---
 def process_submission(country, date_str):
     user_input = st.session_state.get("user_input_field", "").strip()
     if not user_input:
         st.warning("내용을 입력해주세요!")
         return
 
-    parsed_data = parse_expense_with_ai(user_input, country, date_str, API_KEY)
-    if parsed_data and isinstance(parsed_data, dict):
-        current_data = load_data()
-        current_data.append(parsed_data)
-        save_data(current_data)
-
-        # 입력창 자동으로 비우기 (에러 없이 안전하게 동작)
-        st.session_state["user_input_field"] = ""
-        st.toast(f"기록 완료! [{parsed_data.get('type')}] {parsed_data.get('description')} ({parsed_data.get('amount_krw', 0):,}원)")
+    with st.spinner("AI 분석 및 DB 저장 중..."):
+        parsed_data = parse_expense_with_ai(user_input, country, date_str, API_KEY)
+        if parsed_data and isinstance(parsed_data, dict):
+            if save_single_data(parsed_data):
+                st.session_state["user_input_field"] = ""
+                st.toast(f"✅ 저장 완료! [{parsed_data.get('type')}] {parsed_data.get('description')} ({parsed_data.get('amount_krw', 0):,}원)")
 
 
 # --- Streamlit UI 설정 ---
@@ -157,20 +191,18 @@ countries = load_countries()
 new_country = st.sidebar.text_input("추가할 국가 이름")
 if st.sidebar.button("국가 추가"):
     if new_country and new_country not in countries:
-        countries.append(new_country)
-        save_countries(countries)
-        st.sidebar.success(f"'{new_country}' 국가가 추가되었습니다!")
-        st.rerun()
+        if add_country_db(new_country):
+            st.sidebar.success(f"'{new_country}' 국가가 추가되었습니다!")
+            st.rerun()
 
 if countries:
     delete_country = st.sidebar.selectbox("삭제할 국가 선택", countries)
     if st.sidebar.button("선택 국가 삭제"):
-        countries.remove(delete_country)
-        save_countries(countries)
-        if st.session_state.selected_country == delete_country:
-            st.session_state.selected_country = None
-        st.sidebar.warning(f"'{delete_country}' 국가가 삭제되었습니다.")
-        st.rerun()
+        if delete_country_db(delete_country):
+            if st.session_state.selected_country == delete_country:
+                st.session_state.selected_country = None
+            st.sidebar.warning(f"'{delete_country}' 국가가 삭제되었습니다.")
+            st.rerun()
 
 # --- 메인 화면 로직 ---
 
@@ -211,7 +243,7 @@ else:
         key="user_input_field"
     )
 
-    # 버튼 클릭 시 안전한 콜백 함수(on_click)로 제출 처리
+    # 버튼 클릭 시 제출 처리
     st.button(
         "AI로 내역 기록하기",
         use_container_width=True,
@@ -220,7 +252,7 @@ else:
     )
 
     st.markdown("---")
-    
+
     # 내역 목록 분석
     data = load_data()
 
@@ -233,7 +265,6 @@ else:
             country_df = pd.DataFrame()
 
         if not country_df.empty:
-            # 구버전 호환성 컬럼 보장
             if "type" not in country_df.columns:
                 country_df["type"] = "지출"
             if "payment_method" not in country_df.columns:
@@ -249,7 +280,7 @@ else:
             total_expense = country_df[country_df["type"] == "지출"]["amount_krw"].sum()
             balance = total_income - total_expense
 
-            # 1. 전체 보기 (모바일 반응형 카드 구조)
+            # 1. 전체 보기 (모바일 카드)
             with tab1:
                 st.metric(label="💰 남은 잔액", value=f"{balance:,}원")
                 st.caption(f"총 입금: {total_income:,}원 / 총 지출: {total_expense:,}원")
@@ -270,14 +301,12 @@ else:
                             st.markdown(f"**금액:** {row.get('amount_krw', 0):,}원{orig_display}")
                         with c2:
                             if st.button("🗑️", key=f"del_{row.get('id')}"):
-                                all_data = load_data()
-                                updated_data = [item for item in all_data if item.get("id") != row.get("id")]
-                                save_data(updated_data)
-                                st.toast("삭제되었습니다!")
-                                st.rerun()
+                                if delete_single_data(row.get("id")):
+                                    st.toast("삭제되었습니다!")
+                                    st.rerun()
                         st.markdown("---")
 
-            # 2. 입금/출금 구분 보기 탭
+            # 2. 입/출금 탭
             with tab2:
                 st.markdown("#### 💵 수입 (입금) 내역")
                 inc_df = country_df[country_df["type"] == "수입"][["date", "payment_method", "description", "amount_krw"]].copy()
@@ -298,7 +327,7 @@ else:
                 else:
                     st.info("지출 내역이 없습니다.")
 
-            # 3. 카테고리별 보기
+            # 3. 카테고리별
             with tab3:
                 categories = country_df["category"].unique()
                 for cat in categories:
@@ -310,7 +339,7 @@ else:
                     st.caption(f"👉 **{cat}** 합계: **{cat_total:,}원**")
                     st.markdown("---")
 
-            # 4. 날짜별 보기
+            # 4. 날짜별
             with tab4:
                 dates = sorted(country_df["date"].unique(), reverse=True)
                 for dt in dates:
@@ -324,7 +353,7 @@ else:
                     st.caption(f"👉 합계 — 입금: **{dt_income:,}원** / 지출: **{dt_expense:,}원**")
                     st.markdown("---")
 
-            # CSV 엑셀 다운로드
+            # CSV 다운로드
             st.markdown("---")
             csv_cols = ["date", "type", "payment_method", "category", "description", "amount_krw", "original_amount_text"]
             csv_data = country_df[csv_cols].copy()
@@ -346,6 +375,6 @@ else:
 
     st.markdown("---")
     if st.button("전체 데이터 초기화", use_container_width=True):
-        if os.path.exists(DATA_FILE):
-            os.remove(DATA_FILE)
+        if clear_all_data():
+            st.toast("모든 내역이 초기화되었습니다.")
             st.rerun()
